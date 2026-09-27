@@ -1,0 +1,11 @@
+.tools/
+dist/
+*.log
+__pycache__/
+tests/
+docs/
+scripts/
+.gitattributes
+*.smx
+
+
