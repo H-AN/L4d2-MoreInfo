@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <sdkhooks>
 
-#define VERSION "1.0.2"
+#define VERSION "1.0.3"
 #define MAX_BOSSES 16
 #define MAX_PHASES 4
 #define MAX_HITS 8
@@ -202,11 +202,12 @@ float g_Layout[7][4];
 bool g_Reserved[15];
 bool g_HudReady, g_MapReady, g_RoundLive, g_Late, g_Internal, g_Reverting, g_ScanQueued;
 int g_Epoch, g_Serial;
-float g_NextHud, g_HudTestUntil;
+float g_NextHud, g_HudTestUntil, g_HudStompLog;
+int g_HudStomps;
 ConVar cvEnable, cvHp, cvMsg, cvRank, cvRankHud, cvRankChat;
 ConVar cvBossSlot, cvMsgSlots, cvRankSlots, cvInterval, cvHpHold, cvMsgHold;
 ConVar cvFilter, cvPageTime, cvChatTime, cvBots, cvDebug, cvHideChat, cvRankHudTime, cvCountdown, cvTranslate;
-ConVar cvNoticeHud, cvNoticeChat, cvNoticeHold;
+ConVar cvNoticeHud, cvNoticeChat, cvNoticeHold, cvHudFrame;
 
 #include "l4d2_moreinfo/util.inc"
 #include "l4d2_moreinfo/config.inc"
@@ -243,6 +244,7 @@ public void OnPluginStart() {
     cvMsgSlots = Setting("hud_msg_slots", "1,2", "Exactly two distinct HUD slots");
     cvRankSlots = Setting("hud_rank_slots", "3,4,5,6", "Title and three ranking slots");
     cvInterval = Setting("hud_interval", "0.10", "HUD refresh seconds", true, 0.05, 1.0);
+    cvHudFrame = Setting("hud_frame_force", "1", "0 write on change only; 1 rewrite owned HUD slots from the ~0.1 s timer; 2 rewrite them every game frame", true, 0.0, 2.0);
     cvHpHold = Setting("boss_hp_hold", "3.0", "Health hold seconds", true, 0.1, 60.0);
     cvMsgHold = Setting("map_msg_hold", "11.0", "Message hold seconds (countdown messages use their own seconds)", true, 0.1, 60.0);
     cvFilter = Setting("map_msg_filter_mode", "0", "0 strict rules; 1 loose server chat", true);
@@ -343,6 +345,7 @@ public void OnGameFrame() {
         }
         g_Depth = 0; g_Overflow = 0;
     }
+    HudFrame(2);
 }
 
 void ResetRuntime(bool partial) {
@@ -410,5 +413,6 @@ public Action Tick(Handle timer) {
         g_NextHud = now + cvInterval.FloatValue;
         RenderHud();
     }
+    HudFrame(1);
     return Plugin_Continue;
 }

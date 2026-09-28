@@ -110,6 +110,7 @@
 | Cvar | 默认 | 说明 |
 | --- | --- | --- |
 | `l4d2_moreinfo_hud_interval` | 0.10 | HUD 刷新间隔秒数（0.05～1） |
+| `l4d2_moreinfo_hud_frame_force` | 1 | 重写本插件的 HUD 槽位，防止被导演系统、地图脚本或其他插件重置：0 只在内容变化时写入（1.0.1 的逻辑）；1 由约 0.1 秒一次的循环计时器重写；2 每帧重写（HUD 仍闪烁时使用） |
 | `l4d2_moreinfo_hud_boss_slot` | 0 | Boss 血量用的槽位 |
 | `l4d2_moreinfo_hud_msg_slots` | 1,2 | 地图消息用的两个槽位 |
 | `l4d2_moreinfo_hud_rank_slots` | 3,4,5,6 | 排名用的 4 个槽位：标题 + 3 行 |

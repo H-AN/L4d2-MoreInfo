@@ -31,7 +31,9 @@ bool StillOwned(int slot) {
 }
 
 void ReleaseSlot(int slot) {
-    if (g_MapReady && StillOwned(slot)) {
+    // Force mode keeps rewriting owned slots, so clear them even if something changed them meanwhile.
+    // 强制模式会一直覆盖自己的槽位，所以即使中途被改过也照样清空。
+    if (g_MapReady && g_HudReady && g_Hud[slot].owned && (cvHudFrame.BoolValue || StillOwned(slot))) {
         GameRules_SetProp("m_iScriptedHUDFlags", HUD_HIDDEN, 4, slot, true);
         GameRules_SetPropString("m_szScriptedHUDStringSet", "", true, slot);
     }
@@ -39,11 +41,54 @@ void ReleaseSlot(int slot) {
 }
 void ReleaseHud() { for (int s = 0; s < 15; s++) ReleaseSlot(s); }
 
+// Write the stored text/rect of a slot to GameRules. / 把槽位保存的文字和位置写入 GameRules。
+void WriteSlot(int slot) {
+    // The shared update flag must remain enabled for other HUD users after unloading.
+    // 这个共享的刷新标志在卸载后也要保持开启，其他使用 HUD 的插件依赖它。
+    GameRules_SetProp("m_bChallengeModeActive", 1, 1, 0, true);
+    GameRules_SetPropFloat("m_fScriptedHUDPosX", g_Hud[slot].rect[0], slot, true);
+    GameRules_SetPropFloat("m_fScriptedHUDPosY", g_Hud[slot].rect[1], slot, true);
+    GameRules_SetPropFloat("m_fScriptedHUDWidth", g_Hud[slot].rect[2], slot, true);
+    GameRules_SetPropFloat("m_fScriptedHUDHeight", g_Hud[slot].rect[3], slot, true);
+    GameRules_SetPropString("m_szScriptedHUDStringSet", g_Hud[slot].text, true, slot);
+    GameRules_SetProp("m_iScriptedHUDFlags", HUD_FLAGS, 4, slot, true);
+}
+
+// Force mode: rewrite owned slots in case something resets the scripted HUD.
+// hud_frame_force 1 runs this from the repeating Tick timer (~0.1 s), 2 every game frame.
+// Counts how often the values were found changed, so the test shows whether anything interferes.
+// 强制模式：重写自己的槽位，防止脚本 HUD 被别的东西重置。
+// hud_frame_force 为 1 时由循环计时器 Tick 执行（约 0.1 秒一次），为 2 时每帧执行。
+// 同时统计发现被改动的次数，测试时可以看出是否真有东西在干扰。
+void HudFrame(int mode) {
+    if (!g_HudReady || !g_MapReady || cvHudFrame.IntValue != mode) return;
+    bool any;
+    for (int s = 0; s < 15; s++) {
+        if (!g_Hud[s].owned || g_Hud[s].blocked) continue;
+        if (!StillOwned(s)) HudStomped(s);
+        WriteSlot(s);
+        any = true;
+    }
+    if (any && !GameRules_GetProp("m_bChallengeModeActive", 1)) HudStomped(-1);
+}
+
+void HudStomped(int slot) {
+    g_HudStomps++;
+    // At most one log line per second; the reset may repeat every frame.
+    // 每秒最多记一条日志，重置可能每帧都发生。
+    float now = GetGameTime();
+    if (cvDebug.IntValue >= 1 && now >= g_HudStompLog) {
+        g_HudStompLog = now + 1.0;
+        if (slot < 0) LogMessage("HUD m_bChallengeModeActive was reset to 0; rewritten (total %d)", g_HudStomps);
+        else LogMessage("HUD slot %d was changed externally; rewritten (total %d)", slot, g_HudStomps);
+    }
+}
+
 void PutHud(int region, const char[] text) {
     if (!g_HudReady) return;
     int slot = g_Slots[region];
     if (g_Hud[slot].blocked) return;
-    if (g_Hud[slot].owned && !StillOwned(slot)) {
+    if (g_Hud[slot].owned && !cvHudFrame.BoolValue && !StillOwned(slot)) {
         g_Hud[slot].owned = false; g_Hud[slot].blocked = true;
         LogError("HUD slot %d changed externally; stopped writing until reload", slot);
         return;
@@ -60,17 +105,9 @@ void PutHud(int region, const char[] text) {
     }
     char safe[128]; Utf8Copy(safe, sizeof(safe), text);
     if (g_Hud[slot].owned && StrEqual(safe, g_Hud[slot].text)) return;
-    // The shared update flag must remain enabled for other HUD users after unloading.
-    // 这个共享的刷新标志在卸载后也要保持开启，其他使用 HUD 的插件依赖它。
-    GameRules_SetProp("m_bChallengeModeActive", 1, 1, 0, true);
-    GameRules_SetPropFloat("m_fScriptedHUDPosX", g_Layout[region][0], slot, true);
-    GameRules_SetPropFloat("m_fScriptedHUDPosY", g_Layout[region][1], slot, true);
-    GameRules_SetPropFloat("m_fScriptedHUDWidth", g_Layout[region][2], slot, true);
-    GameRules_SetPropFloat("m_fScriptedHUDHeight", g_Layout[region][3], slot, true);
-    GameRules_SetPropString("m_szScriptedHUDStringSet", safe, true, slot);
-    GameRules_SetProp("m_iScriptedHUDFlags", HUD_FLAGS, 4, slot, true);
     strcopy(g_Hud[slot].text, sizeof(g_Hud[].text), safe);
     for (int i = 0; i < 4; i++) g_Hud[slot].rect[i] = g_Layout[region][i];
+    WriteSlot(slot);
     g_Hud[slot].owned = true;
     if (cvDebug.IntValue >= 2) LogMessage("HUD write slot=%d rect=%.2f,%.2f,%.2f,%.2f text=%s",
         slot, g_Layout[region][0], g_Layout[region][1], g_Layout[region][2], g_Layout[region][3], safe);
