@@ -11,7 +11,8 @@ public Action CommandStatus(int client, int argc) {
     ReplyToCommand(client, "[MoreInfo] 版本 %s | 总开关:%s 血量:%s 消息:%s 排行:%s 排行HUD:%s 排行聊天:%s | HUD可用:%s 待显示排行:%d",
         VERSION, OnOff(cvEnable.BoolValue), OnOff(cvHp.BoolValue), OnOff(cvMsg.BoolValue), OnOff(cvRank.BoolValue),
         OnOff(cvRankHud.BoolValue), OnOff(cvRankChat.BoolValue), YesNo(g_HudReady), g_Results.Length);
-    ReplyToCommand(client, "[MoreInfo] Boss:%d 消息规则:%d 翻译:%d%s", g_BossCount, g_RuleCount, g_TrCount, g_BossCount ? "" : "（当前地图未配置 Boss）");
+    ReplyToCommand(client, "[MoreInfo] Boss:%d 消息规则:%d 翻译:%d 神器归属:%d 待生效:%d%s", g_BossCount, g_RuleCount, g_TrCount,
+        g_CreditCount, g_Pending.Length, g_BossCount ? "" : "（当前地图未配置 Boss）");
     ReplyToCommand(client, "[MoreInfo] 当前消息:%d 过滤模式:%s | 消息钩子 SayText:%s SayText2:%s TextMsg:%s",
         g_Messages.Length, cvFilter.IntValue ? "宽松" : "严格",
         YesNo(g_SayText != INVALID_MESSAGE_ID), YesNo(g_SayText2 != INVALID_MESSAGE_ID), YesNo(g_TextMsg != INVALID_MESSAGE_ID));
@@ -26,9 +27,9 @@ public Action CommandStatus(int client, int argc) {
         char hp[48];
         if (g_Boss[b].maxHp > 0.0) Format(hp, sizeof(hp), "%.1f / %.1f", g_Boss[b].hp, g_Boss[b].maxHp);
         else Format(hp, sizeof(hp), "%.1f / 未知", g_Boss[b].hp);
-        ReplyToCommand(client, "[MoreInfo] %s（第%d场）: %s 阶段%d/%d 血量 %s 实体引用:%d 未归属:%.1f 贡献人数:%d%s%s",
+        ReplyToCommand(client, "[MoreInfo] %s（第%d场）: %s 阶段%d/%d 血量 %s 实体引用:%d 未归属:%.1f 贡献人数:%d 神器记录:%d%s%s",
             g_Config[b].id, g_Boss[b].serial, StatusName(g_Boss[b].status), g_Boss[b].phase+1, g_Config[b].phaseCount,
-            hp, g_Boss[b].healthRef, g_Boss[b].unknown, g_Boss[b].contributions.Length,
+            hp, g_Boss[b].healthRef, g_Boss[b].unknown, g_Boss[b].contributions.Length, g_Boss[b].materia.Length,
             g_Boss[b].partial ? " 统计不完整" : "", g_Boss[b].ambiguous ? " 选择器冲突(已停用)" : "");
     }
     return Plugin_Handled;

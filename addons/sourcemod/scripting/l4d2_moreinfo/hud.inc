@@ -97,6 +97,7 @@ void RenderHud() {
     }
     if (cvMsg.BoolValue) MessageText(lines);
     RankingText(lines);
+    NoticeText(lines);
     if (now < g_HudTestUntil) {
         // Self-test: fill every region so rendering can be checked without boss/message state.
         // 自检：填满所有区域，不需要 Boss 或地图消息也能检查显示效果。

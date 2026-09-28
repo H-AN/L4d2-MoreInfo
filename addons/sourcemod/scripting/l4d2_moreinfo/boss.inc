@@ -14,6 +14,7 @@ void ResetBoss(int b, bool partial) {
     g_Boss[b].startDamaged = false;
     g_Boss[b].startAt = 0.0;
     g_Boss[b].contributions.Clear();
+    g_Boss[b].materia.Clear();
 }
 
 void RegisterSignal(Signal signal) {
@@ -227,6 +228,7 @@ public void FinishFrame(any data) {
     if (epoch != g_Epoch || !cvEnable.BoolValue || !g_RoundLive || b >= g_BossCount ||
         g_Boss[b].serial != serial || g_Boss[b].phase != phase || g_Boss[b].status != 2) return;
     ObserveUnknown(b);
+    FlushCredits(b);
     if (phase + 1 < g_Config[b].phaseCount) {
         g_Boss[b].phase++;
         g_Boss[b].status = 0;
@@ -242,14 +244,28 @@ public void FinishFrame(any data) {
     }
 }
 
+// The finish is a confirmed OnBreak on the health body, which proves final zero HP.
+// 结束信号是血量实体上确认的 OnBreak，证明血量已归零。
+bool BreakConfirmed(int b) {
+    int p = g_Boss[b].phase;
+    return g_Boss[b].status == 2 && g_Config[b].phases[p].model == 0 &&
+        StrEqual(g_Config[b].phases[p].finish.output, "OnBreak") &&
+        SameSelector(g_Config[b].phases[p].finish.entity, g_Config[b].phases[p].health);
+}
+
 void ObserveUnknown(int b) {
     float hp;
     if (!CurrentHealth(b, hp)) {
+        // A scripted Break (e.g. materia killing blow) removes the body without changing HP.
+        // Only a pending credited cast may claim that remainder; otherwise unchanged behavior.
+        // 脚本 Break（如神器最后一击）不改血量就删除实体。只有待生效的施放可以认领剩余血量，否则行为不变。
+        if (g_Boss[b].hp > 0.0 && cvRank.BoolValue && BreakConfirmed(b))
+            g_Boss[b].hp = Positive(g_Boss[b].hp - AllocateCredit(b, g_Boss[b].hp));
         if (g_Boss[b].hp > 0.0) g_Boss[b].partial = true;
         return;
     }
     float loss = Positive(g_Boss[b].hp - hp);
-    if (cvRank.BoolValue) g_Boss[b].unknown += loss;
+    if (cvRank.BoolValue) g_Boss[b].unknown += loss - AllocateCredit(b, loss);
     g_Boss[b].hp = hp;
 }
 

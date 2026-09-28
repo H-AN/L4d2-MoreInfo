@@ -90,8 +90,45 @@ bool ParsePhase(KeyValues kv, PhaseConfig phase) {
     return phase.hitCount > 0;
 }
 
-bool ParseMap(KeyValues kv, BossConfig[] bosses, int &count, MessageRule[] rules, int &ruleCount) {
-    count = 0; ruleCount = 0;
+// Optional per-boss "credited" section; the kv cursor is on the boss.
+// "credited" { "<id>" { "label" "终极" "caster" { selector + "output" }
+//     "apply" { "1" { selector + "output" "amount" "25000" "delay" "0" } } } }
+// 可选的每个 Boss 的 "credited" 段；调用时 kv 位于该 Boss 节点。
+bool ParseCredits(KeyValues kv, int boss, CreditConfig[] credits, int &creditCount) {
+    if (!kv.JumpToKey("credited")) return true;
+    if (kv.GotoFirstSubKey()) {
+        do {
+            if (creditCount >= MAX_CREDITS) return false;
+            CreditConfig credit;
+            credit.boss = boss;
+            char section[32];
+            kv.GetSectionName(section, sizeof(section));
+            kv.GetString("label", credit.label, sizeof(credit.label), section);
+            if (!credit.label[0] || !ReadSignal(kv, "caster", credit.caster, true)) return false;
+            if (!kv.JumpToKey("apply") || !kv.GotoFirstSubKey()) return false;
+            do {
+                if (credit.applyCount >= MAX_APPLIES) return false;
+                int a = credit.applyCount;
+                bool valid = ReadSelector(kv, credit.applies[a].entity);
+                kv.GetString("output", credit.applies[a].output, sizeof(credit.applies[].output));
+                credit.amounts[a] = kv.GetFloat("amount", 0.0);
+                credit.delays[a] = kv.GetFloat("delay", 0.0);
+                if (!valid || !credit.applies[a].output[0] || credit.amounts[a] <= 0.0 ||
+                    credit.amounts[a] >= 1000000000.0 || credit.delays[a] < 0.0 || credit.delays[a] > 120.0) return false;
+                credit.applyCount++;
+            } while (kv.GotoNextKey());
+            kv.GoBack(); kv.GoBack();
+            credits[creditCount++] = credit;
+        } while (kv.GotoNextKey());
+        kv.GoBack();
+    }
+    kv.GoBack();
+    return true;
+}
+
+bool ParseMap(KeyValues kv, BossConfig[] bosses, int &count, MessageRule[] rules, int &ruleCount,
+              CreditConfig[] credits, int &creditCount) {
+    count = 0; ruleCount = 0; creditCount = 0;
     if (kv.JumpToKey("bosses")) {
         if (kv.GotoFirstSubKey()) {
             do {
@@ -109,6 +146,7 @@ bool ParseMap(KeyValues kv, BossConfig[] bosses, int &count, MessageRule[] rules
                 } while (kv.GotoNextKey());
                 kv.GoBack(); kv.GoBack();
                 bosses[count].phaseCount = p;
+                if (!ParseCredits(kv, count, credits, creditCount)) return false;
                 count++;
             } while (kv.GotoNextKey());
             kv.GoBack();
@@ -221,6 +259,7 @@ bool LoadConfiguration(bool reload, char[] error, int size) {
     // 先完整解析到临时变量，校验全部通过前不改动任何运行中的状态。
     static BossConfig next[MAX_BOSSES];
     static MessageRule rules[MAX_RULES];
+    static CreditConfig credits[MAX_CREDITS];
     BossConfig empty; MessageRule emptyRule;
     for (int i = 0; i < MAX_BOSSES; i++) next[i] = empty;
     for (int i = 0; i < MAX_RULES; i++) rules[i] = emptyRule;
@@ -230,10 +269,10 @@ bool LoadConfiguration(bool reload, char[] error, int size) {
     GetCurrentMap(map, sizeof(map));
     ReplaceString(map, sizeof(map), "/", "_"); ReplaceString(map, sizeof(map), "\\", "_");
     MapFile(map, "config.cfg", path, sizeof(path));
-    int count, ruleCount;
+    int count, ruleCount, creditCount;
     KeyValues kv = new KeyValues("MoreInfo");
     if (FileExists(path)) {
-        if (!kv.ImportFromFile(path) || !ParseMap(kv, next, count, rules, ruleCount)) {
+        if (!kv.ImportFromFile(path) || !ParseMap(kv, next, count, rules, ruleCount, credits, creditCount)) {
             delete kv; strcopy(error, size, "Invalid map configuration (limits/selectors/phases/signals)"); return false;
         }
     }
@@ -251,6 +290,11 @@ bool LoadConfiguration(bool reload, char[] error, int size) {
     g_BossCount = count; g_RuleCount = ruleCount;
     for (int i = 0; i < count; i++) g_Config[i] = next[i];
     for (int i = 0; i < ruleCount; i++) g_Rules[i] = rules[i];
+    // Credit indices may shift on reload: drop in-flight casts, never misattribute them.
+    // 重载后施放配置的序号可能变化：丢弃进行中的施放，避免错误归属。
+    g_CreditCount = creditCount;
+    for (int i = 0; i < creditCount; i++) g_Credit[i] = credits[i];
+    ResetCredits();
     // Translations only affect HUD text; a broken file logs and falls back to original text.
     // 翻译只影响 HUD 文字；文件有误时记录错误并显示原文。
     g_TrCount = 0;
@@ -265,7 +309,9 @@ bool LoadConfiguration(bool reload, char[] error, int size) {
     }
     UnregisterSignals();
     RegisterSignals();
+    UnregisterCredits();
+    RegisterCredits();
     if (g_MapReady && cvEnable.BoolValue) ScanBindings();
-    LogMessage("Loaded map=%s bosses=%d message_rules=%d translations=%d", map, count, ruleCount, g_TrCount);
+    LogMessage("Loaded map=%s bosses=%d message_rules=%d translations=%d credited=%d", map, count, ruleCount, g_TrCount, creditCount);
     return true;
 }

@@ -7,5 +7,6 @@ docs/
 scripts/
 .gitattributes
 *.smx
+compiled/
 
 
