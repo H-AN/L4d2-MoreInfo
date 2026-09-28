@@ -20,8 +20,8 @@ public Action CommandStatus(int client, int argc) {
         ReplyToCommand(client, "[MoreInfo] 严格模式没有消息规则，请配置 maps/<当前地图名>/config.cfg 的 messages。");
     char forceNames[3][] = {"关", "计时器", "每帧"};
     int force = cvHudFrame.IntValue;
-    ReplyToCommand(client, "[MoreInfo] 强制刷新HUD:%s 发现被外部改动:%d 次 挑战模式标志:%d",
-        forceNames[force >= 0 && force <= 2 ? force : 0], g_HudStomps, g_HudReady ? GameRules_GetProp("m_bChallengeModeActive", 1) : -1);
+    ReplyToCommand(client, "[MoreInfo] HUD后端:%s 强制刷新HUD:%s 发现被外部改动:%d 次 挑战模式标志:%d",
+        g_HudBackend == 1 ? "VScript" : "netprop", forceNames[force >= 0 && force <= 2 ? force : 0], g_HudStomps, g_HudReady ? GameRules_GetProp("m_bChallengeModeActive", 1) : -1);
     for (int i = 0; i < 7; i++) {
         int slot = g_Slots[i];
         ReplyToCommand(client, "[MoreInfo] HUD区域 %s: 槽位%d %s", g_RegionNames[i], slot,

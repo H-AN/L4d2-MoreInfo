@@ -5,7 +5,7 @@
 #include <sdktools>
 #include <sdkhooks>
 
-#define VERSION "1.0.3"
+#define VERSION "1.0.4"
 #define MAX_BOSSES 16
 #define MAX_PHASES 4
 #define MAX_HITS 8
@@ -204,11 +204,15 @@ bool g_HudReady, g_MapReady, g_RoundLive, g_Late, g_Internal, g_Reverting, g_Sca
 int g_Epoch, g_Serial;
 float g_NextHud, g_HudTestUntil, g_HudStompLog;
 int g_HudStomps;
+int g_HudBackend = 1; // applied hud_backend: 0 netprop, 1 VScript (smHud.inc) / 当前生效的 HUD 后端
+bool g_HudDirty;      // VScript fields queued, HUDSetLayout pending / 已写入 VScript 字段，待调用 HUDSetLayout
+float g_HudSent[15];
 ConVar cvEnable, cvHp, cvMsg, cvRank, cvRankHud, cvRankChat;
 ConVar cvBossSlot, cvMsgSlots, cvRankSlots, cvInterval, cvHpHold, cvMsgHold;
 ConVar cvFilter, cvPageTime, cvChatTime, cvBots, cvDebug, cvHideChat, cvRankHudTime, cvCountdown, cvTranslate;
-ConVar cvNoticeHud, cvNoticeChat, cvNoticeHold, cvHudFrame;
+ConVar cvNoticeHud, cvNoticeChat, cvNoticeHold, cvHudFrame, cvHudBackend;
 
+#include "l4d2_moreinfo/smHud.inc"
 #include "l4d2_moreinfo/util.inc"
 #include "l4d2_moreinfo/config.inc"
 #include "l4d2_moreinfo/hud.inc"
@@ -245,6 +249,8 @@ public void OnPluginStart() {
     cvRankSlots = Setting("hud_rank_slots", "3,4,5,6", "Title and three ranking slots");
     cvInterval = Setting("hud_interval", "0.10", "HUD refresh seconds", true, 0.05, 1.0);
     cvHudFrame = Setting("hud_frame_force", "1", "0 write on change only; 1 rewrite owned HUD slots from the ~0.1 s timer; 2 rewrite them every game frame", true, 0.0, 2.0);
+    cvHudBackend = Setting("hud_backend", "1", "0 write GameRules netprops directly; 1 VScript HUDSetLayout via smHud.inc", true);
+    g_HudBackend = cvHudBackend.IntValue;
     cvHpHold = Setting("boss_hp_hold", "3.0", "Health hold seconds", true, 0.1, 60.0);
     cvMsgHold = Setting("map_msg_hold", "11.0", "Message hold seconds (countdown messages use their own seconds)", true, 0.1, 60.0);
     cvFilter = Setting("map_msg_filter_mode", "0", "0 strict rules; 1 loose server chat", true);
@@ -372,6 +378,11 @@ public void SettingChanged(ConVar cvar, const char[] oldValue, const char[] newV
         }
         ReleaseHud();
         for (int i = 0; i < 7; i++) g_Slots[i] = slots[i];
+    }
+    if (cvar == cvHudBackend) {
+        // Clear with the old backend before switching. / 先用旧后端清空再切换。
+        ReleaseHud();
+        g_HudBackend = cvHudBackend.IntValue;
     }
     if (cvar == cvEnable) {
         g_Epoch++;

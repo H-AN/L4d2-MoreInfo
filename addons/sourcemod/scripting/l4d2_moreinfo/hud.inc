@@ -31,15 +31,87 @@ bool StillOwned(int slot) {
 }
 
 void ReleaseSlot(int slot) {
-    // Force mode keeps rewriting owned slots, so clear them even if something changed them meanwhile.
-    // 强制模式会一直覆盖自己的槽位，所以即使中途被改过也照样清空。
-    if (g_MapReady && g_HudReady && g_Hud[slot].owned && (cvHudFrame.BoolValue || StillOwned(slot))) {
-        GameRules_SetProp("m_iScriptedHUDFlags", HUD_HIDDEN, 4, slot, true);
-        GameRules_SetPropString("m_szScriptedHUDStringSet", "", true, slot);
+    if (g_MapReady && g_HudReady && g_Hud[slot].owned) {
+        if (g_HudBackend == 1) ScriptSlot(slot, false);
+        // Force mode keeps rewriting owned slots, so clear them even if something changed them meanwhile.
+        // 强制模式会一直覆盖自己的槽位，所以即使中途被改过也照样清空。
+        else if (cvHudFrame.BoolValue || StillOwned(slot)) {
+            GameRules_SetProp("m_iScriptedHUDFlags", HUD_HIDDEN, 4, slot, true);
+            GameRules_SetPropString("m_szScriptedHUDStringSet", "", true, slot);
+        }
     }
     g_Hud[slot].owned = false;
 }
-void ReleaseHud() { for (int s = 0; s < 15; s++) ReleaseSlot(s); }
+void ReleaseHud() {
+    for (int s = 0; s < 15; s++) ReleaseSlot(s);
+    FlushScriptHud();
+}
+
+// ---------- VScript backend (hud_backend 1): inc/smHud.inc, HUDSetLayout via logic_script ----------
+// ---------- VScript 后端（hud_backend 1）：用 inc/smHud.inc，经 logic_script 调用 HUDSetLayout ----------
+
+// Escape text for a Squirrel string literal; player names may contain " or \.
+// 转义为 Squirrel 字符串字面量；玩家名可能含有 " 或 \。
+void ScriptEscape(const char[] text, char[] out, int size) {
+    int n;
+    for (int i = 0; text[i] && n < size-3; i++) {
+        int c = text[i];
+        if (c == '\r') continue;
+        if (c == '\n') { out[n++] = '\\'; out[n++] = 'n'; continue; }
+        if (c == '\\' || c == '"') out[n++] = '\\';
+        out[n++] = c;
+    }
+    out[n] = 0;
+}
+
+// Queue one slot into ::MyHUD; FlushScriptHud() applies the layout.
+// 把一个槽位写进 ::MyHUD；由 FlushScriptHud() 统一应用布局。
+void ScriptSlot(int slot, bool visible) {
+    if (!g_HudDirty) {
+        // ::MyHUD lives in the script VM, which may be recreated; rebuild it when missing.
+        // Mark the smHud struct initialised so it never runs script_execute HUDAnimLogic.nut (animations unused).
+        // ::MyHUD 在脚本虚拟机里，虚拟机可能被重建，缺失时重新创建。
+        // 标记 smHud 已初始化，避免它执行 script_execute HUDAnimLogic.nut（本插件不用动画）。
+        L4D2_RunScript("if (!(\"MyHUD\" in getroottable())) ::MyHUD <- { Fields = {} };");
+        HUD.isInit = true;
+        HUD.tableCreated = true;
+        g_HudDirty = true;
+    }
+    char text[260];
+    if (visible) ScriptEscape(g_Hud[slot].text, text, sizeof(text));
+    HUD.AddNewHUD_asTEXT(slot, text, visible ? HUD_FLAGS : HUD_HIDDEN);
+    if (visible) HUD.Place(slot, g_Hud[slot].rect[2], g_Hud[slot].rect[3], g_Hud[slot].rect[0], g_Hud[slot].rect[1]);
+    g_HudSent[slot] = GetGameTime();
+}
+
+void FlushScriptHud() {
+    if (!g_HudDirty) return;
+    g_HudDirty = false;
+    GameRules_SetProp("m_bChallengeModeActive", 1, 1, 0, true);
+    HUD.Draw();
+}
+
+// Resend owned slots whose networked text no longer matches (another HUDSetLayout replaced ours).
+// 联网文字和本插件不一致时（别处的 HUDSetLayout 替换了我们的布局）重新发送。
+void ScriptWatch() {
+    float now = GetGameTime();
+    bool any;
+    for (int s = 0; s < 15; s++) {
+        if (!g_Hud[s].owned || g_Hud[s].blocked) continue;
+        any = true;
+        // HUDSetLayout may apply on the next think; give it time before comparing.
+        // HUDSetLayout 可能在下一次 think 才生效，比较前先等一会。
+        if (now-g_HudSent[s] < 0.5) continue;
+        char actual[128];
+        GameRules_GetPropString("m_szScriptedHUDStringSet", actual, sizeof(actual), s);
+        if (!StrEqual(actual, g_Hud[s].text)) { HudStomped(s); ScriptSlot(s, true); }
+    }
+    if (any && !GameRules_GetProp("m_bChallengeModeActive", 1)) {
+        HudStomped(-1);
+        GameRules_SetProp("m_bChallengeModeActive", 1, 1, 0, true);
+    }
+    FlushScriptHud();
+}
 
 // Write the stored text/rect of a slot to GameRules. / 把槽位保存的文字和位置写入 GameRules。
 void WriteSlot(int slot) {
@@ -62,6 +134,7 @@ void WriteSlot(int slot) {
 // 同时统计发现被改动的次数，测试时可以看出是否真有东西在干扰。
 void HudFrame(int mode) {
     if (!g_HudReady || !g_MapReady || cvHudFrame.IntValue != mode) return;
+    if (g_HudBackend == 1) { ScriptWatch(); return; }
     bool any;
     for (int s = 0; s < 15; s++) {
         if (!g_Hud[s].owned || g_Hud[s].blocked) continue;
@@ -88,7 +161,8 @@ void PutHud(int region, const char[] text) {
     if (!g_HudReady) return;
     int slot = g_Slots[region];
     if (g_Hud[slot].blocked) return;
-    if (g_Hud[slot].owned && !cvHudFrame.BoolValue && !StillOwned(slot)) {
+    bool script = g_HudBackend == 1;
+    if (!script && g_Hud[slot].owned && !cvHudFrame.BoolValue && !StillOwned(slot)) {
         g_Hud[slot].owned = false; g_Hud[slot].blocked = true;
         LogError("HUD slot %d changed externally; stopped writing until reload", slot);
         return;
@@ -107,11 +181,14 @@ void PutHud(int region, const char[] text) {
     if (g_Hud[slot].owned && StrEqual(safe, g_Hud[slot].text)) return;
     strcopy(g_Hud[slot].text, sizeof(g_Hud[].text), safe);
     for (int i = 0; i < 4; i++) g_Hud[slot].rect[i] = g_Layout[region][i];
-    WriteSlot(slot);
+    if (script) ScriptSlot(slot, true);
+    else WriteSlot(slot);
     g_Hud[slot].owned = true;
-    if (cvDebug.IntValue >= 2) LogMessage("HUD write slot=%d rect=%.2f,%.2f,%.2f,%.2f text=%s",
+    if (cvDebug.IntValue >= 2) LogMessage("HUD write (%s) slot=%d rect=%.2f,%.2f,%.2f,%.2f text=%s", script ? "vscript" : "netprop",
         slot, g_Layout[region][0], g_Layout[region][1], g_Layout[region][2], g_Layout[region][3], safe);
-    if (!StillOwned(slot)) {
+    // VScript applies the layout asynchronously, so only the netprop backend can read back immediately.
+    // VScript 布局是异步生效的，只有 netprop 后端能立即回读校验。
+    if (!script && !StillOwned(slot)) {
         g_Hud[slot].owned = false; g_Hud[slot].blocked = true;
         LogError("HUD slot %d failed readback; backend disabled for this slot", slot);
     }
@@ -143,4 +220,5 @@ void RenderHud() {
             Format(lines[i], 512, "[TEST] region=%d slot=%d %s 测试 %.0f", i, g_Slots[i], names[i], g_HudTestUntil-now);
     }
     for (int i = 0; i < 7; i++) PutHud(i, lines[i]);
+    FlushScriptHud();
 }
